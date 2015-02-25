@@ -4,7 +4,7 @@ Easily embed Emscripten-compiled apps in any webpage.  Manages prefetching, file
 
 Usage
 -----
-{{{
+```javascript
       var dos = new EMLoader({
         executable: '/scripts/systems/dosbox.js',
         executableargs: [
@@ -21,5 +21,4 @@ Usage
           '/drived/apps': ['zip', '/diskimages/apps.zip'],
         }
       });
-
-}}}
+```
