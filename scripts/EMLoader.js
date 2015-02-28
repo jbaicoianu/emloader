@@ -39,17 +39,7 @@ function EMLoader(args) {
   this.modulepath = args.modulepath || ('/' + this.generateRandomID());
   this.initialized = false;
 
-  this.batchloader = new EMLoaderBatch();
-  this.batchloader.addEventListener('complete', this.load_complete.bind(this));
-
-  //this.init_module();
-
-  if (args.mnt) {
-    this.init_filesystem(args.mnt);
-  } else {
-    this.init_script();
-  }
-
+  this.pendingfiles = 0;
   this.module = {};
 
   // Detect capabilities
@@ -63,7 +53,16 @@ function EMLoader(args) {
       (this._usingSound ? 'x' : ' ') + '] Sound\t[' +
       (this._usingWorker ? 'x' : ' ') + '] WebWorker');
 
+  if (args.mnt) {
+    this.init_filesystem(args.mnt);
+  } else {
+    this.init_script();
+  }
 }
+
+EMLoader.prototype = Object.create(EventDispatcher.prototype);
+EMLoader.prototype.constructor = EMLoader;
+
 EMLoader.prototype.get_globalfs = function() {
   var globalfs = EMLoader.globalfs;
   if (!globalfs) {
@@ -89,7 +88,7 @@ EMLoader.prototype.init_filesystem = function(mntmap) {
     var type = mntmap[path][0],
         url = mntmap[path][1];
     if (url) {
-      this.batchloader.add(url, this.set_file.bind(this, path, type));
+      this.add_file(url, this.set_file.bind(this, path, type));
     } else {
       this.set_file(path, type);
     }
@@ -258,15 +257,6 @@ EMLoader.prototype.load_progress = function(ev) {
   console.log("progress", ev);
 }
 /**
- * Finalize load
- * @function load_complete
- * @memberof EMLoader
- * @param {Event} ev
- */
-EMLoader.prototype.load_complete = function(ev) {
-  this.init_script();
-}
-/**
  * Load module script file
  * @function init_script
  * @memberof EMLoader
@@ -355,44 +345,41 @@ EMLoader.prototype.generateRandomID = function() {
   });
 }
 
-
-/**
- * EMLoaderBatch - represents a related group of load requests.  Fires an event when all are finished.
- *
- * @class EMLoaderBatch
- */
-
-function EMLoaderBatch(args) {
-  this.pending = 0;
-}
-EMLoaderBatch.prototype = Object.create(EventDispatcher.prototype);
-EMLoaderBatch.prototype.constructor = EMLoaderBatch;
-
-EMLoaderBatch.prototype.add = function(url, callback) {
+EMLoader.prototype.add_file = function(url, callback) {
   console.log('add it', url);
   var xhr = new XMLHttpRequest();
   xhr.open('GET', url, true);
   xhr.responseType = 'arraybuffer';
-  this.pending++;
-  xhr.onload = function(e) {
-    if (xhr.status != 200) return;
-    var data = new Int8Array(xhr.response);
-    callback(data);
-    if (--this.pending == 0) {
-      this.complete();
-    }
-  }.bind(this);
-  xhr.onprogress = function(e) {
-    this.updateprogress(url, e);
-  }.bind(this);
+  xhr.onload = this.file_complete.bind(this, url, callback);
+  xhr.onprogress = this.file_progress.bind(this, url);
+
+  if (this.pendingfiles == 0) {
+    this.dispatchEvent({type: 'batch_begin'});
+  }
+  this.pendingfiles++;
+  this.dispatchEvent({type: 'file_begin', data: { url: url }});
   xhr.send();
 }
-EMLoaderBatch.prototype.updateprogress = function(url, ev) {
-  //this.dispatchEvent({type: 'complete'});
+EMLoader.prototype.file_progress = function(url, ev) {
+  this.dispatchEvent({type: 'file_progress', data: ev});
   console.log(url, ev);
 }
-EMLoaderBatch.prototype.complete = function() {
-  this.dispatchEvent({type: 'complete'});
+EMLoader.prototype.file_complete = function(url, callback, ev) {
+  console.log('blurp', ev, this);
+  var xhr = ev.target;
+
+  if (xhr.status != 200) return;
+  var data = new Int8Array(xhr.response);
+  callback(data);
+
+  this.dispatchEvent({type: 'file_complete'});
+  if (--this.pendingfiles == 0) {
+    this.batch_complete();
+  }
+}
+EMLoader.prototype.batch_complete = function() {
+  this.dispatchEvent({type: 'batch_complete'});
+  this.init_script();
 }
 
 /**
